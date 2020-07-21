@@ -4,8 +4,9 @@ import mkdirp from 'mkdirp'
 import rimraf from 'rimraf'
 import svgson, { stringify } from 'svgson'
 import stringifyObject from 'stringify-object'
-import { camelCase, upperFirst } from 'lodash'
+import { camelCase, upperFirst, compact } from 'lodash'
 import Svgo from 'svgo'
+import axios from 'axios'
 const svgo = new Svgo({
   multipass: true,
   removeViewBox: false,
@@ -38,26 +39,38 @@ ICON_PACKS.forEach(pack => {
   mkdirp.sync(iconsDir)
 })
 
-Promise.all(
-  fs.readdirSync(RAW_DIR).map(async file => {
-    if (!ICON_PATTERN.test(file)) {
+const svgFromDir = async () => {
+  const reources = fs.readdirSync(RAW_DIR).map(iconLabel => {
+    if (!ICON_PATTERN.test(iconLabel)) {
       return
     }
 
-    let fileData = fs.readFileSync(path.resolve(RAW_DIR, file), 'utf8')
+    return {iconLabel, content: fs.readFileSync(path.resolve(RAW_DIR, iconLabel), 'utf8')};
+  })
+  await doSvg(compact(reources));
+}
+
+const svgFromRequest = async () => {
+  const {data} = await axios.get('http://localhost:3000/api/icons')
+  const reources = data.map(icon => ({iconLabel: icon.label, content: icon.svg}))
+  await doSvg(reources);
+}
+
+const doSvg = resources => Promise.all(
+  resources.map(async ({iconLabel, content: fileData}) => {
     let { error, data } = await svgo.optimize(fileData)
     if (error) {
-      console.error(file, error)
+      console.error(iconLabel, error)
       return
     }
 
     let el = await svgson(data)
-    console.log(`Normalizing ${file}...`)
+    console.log(`Normalizing ${iconLabel}...`)
     let { attributes } = el
     let { width, height, viewBox } = attributes
     if (!(width && height)) {
       if (!viewBox) {
-        console.error(file, `doesn't contain a valid size declaration.`)
+        console.error(iconLabel, `doesn't contain a valid size declaration.`)
         console.error(width, height, viewBox)
       }
 
@@ -67,7 +80,7 @@ Promise.all(
     }
 
     if (!(width && height)) {
-      console.error(file, `doesn't contain a valid size declaration.`)
+      console.error(iconLabel, `doesn't contain a valid size declaration.`)
       console.error(width, height, viewBox)
     }
 
@@ -129,9 +142,9 @@ Promise.all(
       }
     })
 
-    fs.writeFileSync(path.join(SVG_DIR, file), stringify(el), 'utf8')
+    fs.writeFileSync(path.join(SVG_DIR, iconLabel), stringify(el), 'utf8')
 
-    let slug = file.replace(ICON_PATTERN, (_, $1) => $1)
+    let slug = iconLabel.replace(ICON_PATTERN, (_, $1) => $1)
     let name = upperFirst(camelCase(slug))
 
     let iconCode = stringifyObject({
@@ -153,7 +166,7 @@ Promise.all(
       fs.writeFileSync(path.join(iconsDir, `${name}.js`), moduleCode, 'utf8')
     })
 
-    return { slug, name, file }
+    return { slug, name, iconLabel }
   })
 ).then(icons => {
   let exportFile = icons
@@ -179,7 +192,7 @@ Promise.all(
               (icon) =>
                 `<td align="center">${
                   icon
-                    ? `<img src="../../svg/${icon.file}"/><br/><sub>Icon${icon.name}</sub>`
+                    ? `<img src="../../svg/${icon.iconLabel}"/><br/><sub>Icon${icon.name}</sub>`
                     : ''
                 }</td>`
             )
@@ -223,3 +236,6 @@ function getContextAttr (el, attr) {
   }
   return null
 }
+
+
+svgFromDir();

@@ -1,0 +1,4 @@
+cd ..
+
+yarn
+yarn build
